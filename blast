@@ -1,0 +1,87 @@
+#analyzing BLAST results for Gulf of Mexico samples
+
+#set up
+library(dplyr) #load packages
+library(taxize)
+library(tidyverse)
+setwd("/Users/quattrinia/Desktop/AW RStudio/data/gomx-blast") #set working directory to folder with sponge data
+
+blast <- read.delim("repseqsblast_w_tax.out", header=FALSE) #read in BLAST results in table format
+names(blast)[names(blast) == "V1"] <- "ASV" #renaming blast table columns
+names(blast)[names(blast) == "V2"] <- "Query sequence ID"
+names(blast)[names(blast) == "V3"] <- "Subj accession number"
+names(blast)[names(blast) == "V4"] <- "Sci name"
+names(blast)[names(blast) == "V5"] <- "E-val"
+names(blast)[names(blast) == "V6"] <- "Bit score"
+names(blast)[names(blast) == "V7"] <- "Percentage of identical matches"
+names(blast)[names(blast) == "V8"] <- "Query coverage per subj"
+names(blast)[names(blast) == "V9"] <- "Taxa name"
+
+#pulling out unique taxa names
+unique.taxa <- unique(blast$V9)
+
+#-----------switched to LAB computer so getworms would work----------------
+#make dataframe with taxa name and associated WORMS id
+worms.id <- get_wormsid(unique.taxa, fuzzy = FALSE) #get WORMS id for each unique taxa name
+taxa.id <- data.frame(unique.taxa, worms.id)
+
+#get classification for each WORMS id
+worms.class <- classification(taxa.id$ids, db = 'worms')
+
+#organize classification format into a dataframe
+class <- rbind(worms.class)
+class.id.dropped <- select(class, -id) #remove id column
+class.spread <- class.id.dropped %>% group_by(query) %>% spread(rank, name) #group such that table is organized by info that was in rows
+
+#saved taxa.id and class.spread as csv files
+write.csv(class.spread, file = "~/Desktop/classification.csv")
+write.csv(taxa.id, file = "~/Desktop/taxa_id.csv")
+
+#----------switched back to office computer-------------
+
+#read in classification and taxa id results in table format
+class.spread <- read.csv("classification.csv")
+taxa.id <- read.csv("taxa_id.csv")
+
+#combine taxa.id dataframe and class.spread dataframe
+names(class.spread)[names(class.spread) == "query"] <- "ids" #rename "query" column in class.spread to "ids" so we can join it with taxa.id
+taxa.classspread <- left_join(taxa.id, class.spread, by = "ids") 
+
+#combine BLAST table with table of taxonomy and WORMS id
+blast.worms.tax <- left_join(blast, taxa.classspread, by = c("Taxa name" = "unique.taxa"))
+write.csv(blast.worms.tax, file = "/Users/quattrinia/Desktop/AW RStudio/results/gomx-blast/blast_wormstax.csv") #exporting table
+
+#filtering out low quality sequence matches 
+blast.top <- blast.worms.tax %>% #selecting the dataset
+  group_by(ASV) %>% #group by ASV
+  filter(`Query coverage per subj` > 85) %>% #select only the sequences that contained more than 85% of our query sequence
+  filter(`Bit score` == max(`Bit score`)) %>% #select only the sequences that had the highest similarity to our query sequence
+  filter(`Percentage of identical matches` >= 85) #select only the sequences that exactly match at least 85% of our query sequence 
+  
+#see how many phyla there are for each ASV
+blast.phycount <- blast.top %>%
+  group_by(ASV) %>% #group by ASV 
+  summarize(n_phyla = length(unique(Phylum))) #counts how many unique phyla there are
+unique(blast.phycount$n_phyla) #see if any ASVs have more than 1 unique phyla; ASV_562 has 2
+
+dup.ASVs <- data.frame(table(blast.top$ASV)) #shows how many identified phyla there are for each ASV
+
+which(blast.top$ASV == "ASV_562", arr.ind=TRUE) #find the rows with ASV_562 
+blast.1phy <- blast.top[-c(482), ] #remove first duplicate of ASV_562 w/ NA values for taxonomy columns
+
+#select only one unique phylum for each ASV and put in dataframe
+blast.1phy <- blast.1phy %>%
+  group_by(ASV) %>% #group by ASV
+  summarize(unique(Phylum)) #summarizes the phylum values for each ASV 
+names(blast.1phy)[names(blast.1phy) == "unique(Phylum)"] <- "Phylum" #renaming unique(Phylum) column to Phylum
+blast.1phy <- blast.1phy %>% #attempting to arrange table by increasing ASV but it won't work >:( 
+  as.data.frame() %>%
+  arrange(ASV)
+
+#join table of ASV + identified phylum to original table of ASVs
+og.ASVs <- read_tsv("rep-seqs.tsv", show_col_types = FALSE) #read in table of all original ASVs
+ASVphy.table <- left_join(og.ASVs, blast.1phy, by = "ASV") #combine to get table of original ASV, its sequence, and identified phylum
+View(ASVphy.table) #NAs represent sequences that didn't have a hit in BLAST or were filtered out by our criteria
+
+#export table
+write.csv(ASVphy.table, "~/Desktop/AW RStudio/results/gomx-blast/rep-seqs-phylum.csv")
