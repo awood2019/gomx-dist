@@ -1,0 +1,24 @@
+# /bin/sh
+# ----------------Parameters---------------------- #
+#$ -S /bin/sh
+#$ -pe mthread 10
+#$ -q mThM.q
+#$ -l mres=400G,h_data=40G,h_vmem=40G,himem
+#$ -cwd
+#$ -j y
+#$ -N repseqsblast
+#$ -o repseqsblast.log
+#$ -m bea
+#$ -M wooda2@si.edu
+#
+# ----------------Modules------------------------- #
+module load bioinformatics/blast
+#
+# ----------------Your Commands------------------- #
+#
+echo + `date` job $JOB_NAME started in $QUEUE with jobID=$JOB_ID on $HOSTNAME
+echo + NSLOTS = $NSLOTS
+#
+blastn -query /scratch/genomics/wooda2/edna/gomx-anth-edna/rep-seqs.fasta -db nt -out repseqsblast.out -max_target_seqs 10 -outfmt "6 qseqid sacc staxid sscinames evalue bitscore pident qcovs" -num_threads $NSLOTS
+#
+echo = `date` job $JOB_NAME done
